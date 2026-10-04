@@ -128,8 +128,7 @@ func (c *Client) doOnce(ctx context.Context, reqBody *Request, result any) error
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Client-Platform", "web")
-	req.Header.Set("User-Agent", UserAgent())
+	SetClientHeaders(req.Header, GraphQLClient)
 	if c.Token != "" {
 		req.Header.Set("Authorization", fmt.Sprintf("Token %s", c.Token))
 	}

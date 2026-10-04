@@ -62,8 +62,7 @@ func Authenticate(email, password, mfaCode, mfaSecret string) (*Session, error) 
 		return nil, errors.New(errors.InternalError, "failed to create login request", errors.CatInternal, false, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Client-Platform", "web")
-	req.Header.Set("User-Agent", graphql.UserAgent())
+	graphql.SetClientHeaders(req.Header, graphql.RESTClient)
 
 	client := newLoginHTTPClient()
 	resp, err := client.Do(req)

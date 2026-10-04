@@ -271,8 +271,7 @@ func (s *Service) postReceiptFile(ctx context.Context, syncID, filename, content
 		return errors.New(errors.InternalError, "failed to create receipt upload request", errors.CatInternal, false, err)
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("Client-Platform", "web")
-	req.Header.Set("User-Agent", graphql.UserAgent())
+	graphql.SetClientHeaders(req.Header, graphql.RESTClient)
 	if token := s.Client.TokenValue(); token != "" {
 		req.Header.Set("Authorization", "Token "+token)
 	}
