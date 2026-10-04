@@ -7,6 +7,7 @@ const (
 	AuthSessionExpired   Code = "AUTH_SESSION_EXPIRED"
 	AuthMFARequired      Code = "AUTH_MFA_REQUIRED"
 	AuthMFAInvalid       Code = "AUTH_MFA_INVALID"
+	AuthEmailOTPRequired Code = "AUTH_EMAIL_OTP_REQUIRED"
 	NetworkUnreachable   Code = "NETWORK_UNREACHABLE"
 	NetworkTimeout       Code = "NETWORK_TIMEOUT"
 	RateLimited          Code = "RATE_LIMITED"

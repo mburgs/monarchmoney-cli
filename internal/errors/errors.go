@@ -44,7 +44,7 @@ func NewWithRetryAfter(code Code, message string, category Category, retryable b
 
 func (e *Error) ExitCode() int {
 	switch e.Code {
-	case AuthRequired, AuthSessionExpired, AuthMFARequired, AuthMFAInvalid:
+	case AuthRequired, AuthSessionExpired, AuthMFARequired, AuthMFAInvalid, AuthEmailOTPRequired:
 		return 3
 	case ReadOnlyViolation:
 		return 4

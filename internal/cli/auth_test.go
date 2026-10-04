@@ -99,7 +99,7 @@ func TestLoginUsesPasswordFlagWithoutPrompt(t *testing.T) {
 
 	called := false
 	var gotEmail, gotPassword string
-	authenticateSession = func(email, password, mfaCode, mfaSecret string) (*auth.Session, error) {
+	authenticateSession = func(email, password, mfaCode, mfaSecret, emailOTP string) (*auth.Session, error) {
 		called = true
 		gotEmail = email
 		gotPassword = password
@@ -147,7 +147,7 @@ func TestLoginJSONIncludesSessionDetails(t *testing.T) {
 	defer restore()
 
 	jsonMode = true
-	authenticateSession = func(email, password, mfaCode, mfaSecret string) (*auth.Session, error) {
+	authenticateSession = func(email, password, mfaCode, mfaSecret, emailOTP string) (*auth.Session, error) {
 		return &auth.Session{
 			Email:     email,
 			Token:     "token-123",
@@ -361,5 +361,41 @@ func testAuthStatusNetworkError(t *testing.T) {
 	}
 	if exitCode != 5 || env.Error.Code != string(clierrors.NetworkUnreachable) {
 		t.Fatalf("network error = exitCode %d, env %#v", exitCode, env)
+	}
+}
+
+func TestLoginPromptsForEmailOTP(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.json")
+	restore := withAuthTestDefaults(t, sessionPath)
+	defer restore()
+
+	scanInput = func(a ...any) (int, error) {
+		*(a[0].(*string)) = "654321"
+		return 1, nil
+	}
+	var gotOTPs []string
+	authenticateSession = func(email, password, mfaCode, mfaSecret, emailOTP string) (*auth.Session, error) {
+		gotOTPs = append(gotOTPs, emailOTP)
+		if emailOTP == "" {
+			return nil, clierrors.New(clierrors.AuthEmailOTPRequired, "email verification code required", clierrors.CatAuth, false, nil)
+		}
+		return &auth.Session{Email: email, Token: "token-123", CreatedAt: time.Now(), UpdatedAt: time.Now()}, nil
+	}
+
+	_ = loginCmd.Flags().Set("email", "a@example.com")
+	_ = loginCmd.Flags().Set("password", "secret")
+	_ = loginCmd.Flags().Set("mfa-code", "")
+	_ = loginCmd.Flags().Set("mfa-secret", "")
+	_ = loginCmd.Flags().Set("email-otp", "")
+
+	out := captureStdout(t, func() {
+		loginCmd.Run(loginCmd, nil)
+	})
+
+	if len(gotOTPs) != 2 || gotOTPs[0] != "" || gotOTPs[1] != "654321" {
+		t.Fatalf("email OTP attempts = %q, want [\"\" \"654321\"]", gotOTPs)
+	}
+	if !strings.Contains(out, "Monarch emailed you a verification code.") || !strings.Contains(out, "Successfully logged in") {
+		t.Fatalf("output = %q, want OTP prompt and success", out)
 	}
 }

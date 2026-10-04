@@ -28,6 +28,7 @@ var (
 	password  string
 	mfaCode   string
 	mfaSecret string
+	emailOTP  string
 )
 
 var (
@@ -76,7 +77,7 @@ var authCmd = &cobra.Command{
 var loginCmd = &cobra.Command{
 	Use:   "login",
 	Short: "Log in to Monarch Money",
-	Long:  `Authenticate non-interactively with --email/--password flags or MONARCH_EMAIL/MONARCH_PASSWORD/MONARCH_MFA_CODE/MONARCH_MFA_SECRET env vars; missing values prompt interactively, and MFA reprompts unless --json. The session token is saved for the active --profile. Agents should prefer env vars over flags to keep secrets out of process lists.`,
+	Long:  `Authenticate non-interactively with --email/--password flags or MONARCH_EMAIL/MONARCH_PASSWORD/MONARCH_MFA_CODE/MONARCH_MFA_SECRET/MONARCH_EMAIL_OTP env vars; missing values prompt interactively, and MFA reprompts unless --json. The session token is saved for the active --profile. Agents should prefer env vars over flags to keep secrets out of process lists.`,
 	Example: `  monarch auth login --email you@example.com
   MONARCH_EMAIL=you@example.com MONARCH_PASSWORD=secret monarch auth login --json`,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -87,6 +88,7 @@ var loginCmd = &cobra.Command{
 		password := firstNonEmpty(password, os.Getenv("MONARCH_PASSWORD"))
 		mfaCode := firstNonEmpty(mfaCode, os.Getenv("MONARCH_MFA_CODE"))
 		mfaSecret := firstNonEmpty(mfaSecret, os.Getenv("MONARCH_MFA_SECRET"))
+		emailOTP := firstNonEmpty(emailOTP, os.Getenv("MONARCH_EMAIL_OTP"))
 
 		if email == "" {
 			fmt.Print("Email: ")
@@ -104,13 +106,24 @@ var loginCmd = &cobra.Command{
 			password = string(bytePassword)
 		}
 
-		sess, err := authenticateSession(email, password, mfaCode, mfaSecret)
-		if err != nil {
-			if e, ok := err.(*errors.Error); ok && e.Code == errors.AuthMFARequired && !jsonMode {
+		sess, err := authenticateSession(email, password, mfaCode, mfaSecret, emailOTP)
+	challenges:
+		for range 2 {
+			e, ok := err.(*errors.Error)
+			if !ok || jsonMode {
+				break
+			}
+			switch e.Code {
+			case errors.AuthMFARequired:
 				fmt.Print("MFA Code: ")
 				scanInput(&mfaCode) //nolint:errcheck // interactive input
-				sess, err = authenticateSession(email, password, mfaCode, mfaSecret)
+			case errors.AuthEmailOTPRequired:
+				fmt.Print("Monarch emailed you a verification code. Code: ")
+				scanInput(&emailOTP) //nolint:errcheck // interactive input
+			default:
+				break challenges
 			}
+			sess, err = authenticateSession(email, password, mfaCode, mfaSecret, emailOTP)
 		}
 
 		if err != nil {
@@ -242,6 +255,7 @@ func init() {
 	loginCmd.Flags().StringVar(&password, "password", "", "password")
 	loginCmd.Flags().StringVar(&mfaCode, "mfa-code", "", "6-digit MFA code")
 	loginCmd.Flags().StringVar(&mfaSecret, "mfa-secret", "", "TOTP secret key for automatic MFA")
+	loginCmd.Flags().StringVar(&emailOTP, "email-otp", "", "verification code Monarch emailed you")
 
 	sessionCmd.AddCommand(sessionPathCmd)
 	authCmd.AddCommand(loginCmd)

@@ -86,6 +86,7 @@ The process exit code is derived from `error.code` (see `internal/errors`). A su
 | 3 | `AUTH_SESSION_EXPIRED` | auth |
 | 3 | `AUTH_MFA_REQUIRED` | auth |
 | 3 | `AUTH_MFA_INVALID` | auth |
+| 3 | `AUTH_EMAIL_OTP_REQUIRED` | auth |
 | 4 | `READ_ONLY_VIOLATION` | safety |
 | 5 | `NETWORK_UNREACHABLE` | network |
 | 5 | `NETWORK_TIMEOUT` | network |

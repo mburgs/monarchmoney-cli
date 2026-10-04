@@ -27,11 +27,13 @@ var (
 )
 
 type loginRequest struct {
-	Username      string `json:"username"`
-	Password      string `json:"password"`
-	SupportsMFA   bool   `json:"supports_mfa"`
-	TrustedDevice bool   `json:"trusted_device"`
-	TOTP          string `json:"totp,omitempty"`
+	Username         string `json:"username"`
+	Password         string `json:"password"`
+	SupportsMFA      bool   `json:"supports_mfa"`
+	SupportsEmailOTP bool   `json:"supports_email_otp"`
+	TrustedDevice    bool   `json:"trusted_device"`
+	TOTP             string `json:"totp,omitempty"`
+	EmailOTP         string `json:"email_otp,omitempty"`
 }
 
 type loginResponse struct {
@@ -39,7 +41,7 @@ type loginResponse struct {
 }
 
 // Authenticate logs in through Monarch's REST endpoint, not GraphQL.
-func Authenticate(email, password, mfaCode, mfaSecret string) (*Session, error) {
+func Authenticate(email, password, mfaCode, mfaSecret, emailOTP string) (*Session, error) {
 	if mfaSecret != "" {
 		code, err := totp.GenerateCode(mfaSecret, time.Now())
 		if err != nil {
@@ -49,11 +51,13 @@ func Authenticate(email, password, mfaCode, mfaSecret string) (*Session, error) 
 	}
 
 	reqBody := loginRequest{
-		Username:      email,
-		Password:      password,
-		SupportsMFA:   true,
-		TrustedDevice: true,
-		TOTP:          mfaCode,
+		Username:         email,
+		Password:         password,
+		SupportsMFA:      true,
+		SupportsEmailOTP: true,
+		TrustedDevice:    true,
+		TOTP:             mfaCode,
+		EmailOTP:         emailOTP,
 	}
 	body, _ := json.Marshal(reqBody)
 
@@ -72,7 +76,7 @@ func Authenticate(email, password, mfaCode, mfaSecret string) (*Session, error) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 403 || resp.StatusCode == 401 {
-		return nil, classifyLoginRejection(resp.StatusCode, decodeLoginError(resp.Body), mfaCode != "")
+		return nil, classifyLoginRejection(resp.StatusCode, decodeLoginError(resp.Body), mfaCode != "", emailOTP != "")
 	}
 
 	if resp.StatusCode != 200 {
@@ -127,9 +131,7 @@ func (e loginError) mentions(words ...string) bool {
 	return false
 }
 
-// Monarch answers 401/403 for MFA, email verification, and CAPTCHA challenges alike; only an
-// explicit MFA signal (or an empty body, the historical MFA response) should trigger an MFA prompt.
-func classifyLoginRejection(status int, apiErr loginError, mfaAttempted bool) error {
+func classifyLoginRejection(status int, apiErr loginError, mfaAttempted, emailOTPAttempted bool) error {
 	reason := apiErr.describe()
 	withReason := func(msg string) string {
 		if reason == "" {
@@ -139,10 +141,14 @@ func classifyLoginRejection(status int, apiErr loginError, mfaAttempted bool) er
 	}
 
 	switch {
+	case apiErr.ErrorCode == "EMAIL_OTP_REQUIRED" && emailOTPAttempted:
+		return errors.New(errors.AuthMFAInvalid, withReason("invalid or expired email verification code"), errors.CatAuth, false, nil)
+	case apiErr.ErrorCode == "EMAIL_OTP_REQUIRED":
+		return errors.New(errors.AuthEmailOTPRequired, withReason("email verification code required"), errors.CatAuth, false, nil)
+	case apiErr.ErrorCode == "PASSWORD_NEEDS_RESET":
+		return errors.New(errors.AuthRequired, withReason("Monarch requires a password reset at app.monarch.com before logging in"), errors.CatAuth, false, nil)
 	case apiErr.mentions("captcha"):
 		return errors.New(errors.AuthRequired, withReason("Monarch blocked programmatic login with a CAPTCHA challenge"), errors.CatAuth, false, nil)
-	case apiErr.mentions("email", "verification code", "verify your device", "otp") && !apiErr.mentions("totp"):
-		return errors.New(errors.AuthRequired, withReason("Monarch requires email verification, which this CLI does not support; enable authenticator-app MFA in Monarch settings and use --mfa-secret"), errors.CatAuth, false, nil)
 	case reason == "" || apiErr.mentions("mfa", "multi-factor", "multi factor", "two-factor", "2fa", "totp", "authenticator"):
 		if mfaAttempted {
 			return errors.New(errors.AuthMFAInvalid, withReason("invalid credentials or MFA code"), errors.CatAuth, false, nil)

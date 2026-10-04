@@ -202,13 +202,13 @@ func testAuthenticateInputValidation(t *testing.T) {
 	t.Helper()
 
 	t.Run("invalid mfa secret", func(t *testing.T) {
-		_, err := Authenticate("a@example.com", "password", "", "not-base32")
+		_, err := Authenticate("a@example.com", "password", "", "not-base32", "")
 		mustErrContains(t, err, "failed to generate MFA code")
 	})
 
 	t.Run("request creation error", func(t *testing.T) {
 		loginEndpoint = "://"
-		_, err := Authenticate("a@example.com", "password", "", "")
+		_, err := Authenticate("a@example.com", "password", "", "", "")
 		mustErrContains(t, err, "failed to create login request")
 		loginEndpoint = "https://api.monarch.com/auth/login/"
 	})
@@ -223,7 +223,7 @@ func testAuthenticateFailureResponses(t *testing.T) {
 				return nil, errors.New("network down")
 			})}
 		}
-		_, err := Authenticate("a@example.com", "password", "", "")
+		_, err := Authenticate("a@example.com", "password", "", "", "")
 		mustErrContains(t, err, "failed to reach Monarch API")
 	})
 
@@ -233,7 +233,7 @@ func testAuthenticateFailureResponses(t *testing.T) {
 				return &http.Response{StatusCode: 401, Body: io.NopCloser(bytes.NewBufferString(""))}, nil
 			})}
 		}
-		_, err := Authenticate("a@example.com", "password", "", "")
+		_, err := Authenticate("a@example.com", "password", "", "", "")
 		mustErrContains(t, err, "MFA code required")
 	})
 
@@ -243,7 +243,7 @@ func testAuthenticateFailureResponses(t *testing.T) {
 				return &http.Response{StatusCode: 401, Body: io.NopCloser(bytes.NewBufferString(""))}, nil
 			})}
 		}
-		_, err := Authenticate("a@example.com", "password", "123456", "")
+		_, err := Authenticate("a@example.com", "password", "123456", "", "")
 		mustErrContains(t, err, "invalid credentials or MFA code")
 	})
 
@@ -260,19 +260,22 @@ func testAuthenticateFailureResponses(t *testing.T) {
 		status   int
 		body     string
 		mfaCode  string
+		emailOTP string
 		wantCode apperrors.Code
 		want     string
 	}{
-		{"explicit mfa required", 403, `{"detail":"Multi-Factor Auth Required","error_code":"MFA_REQUIRED"}`, "", apperrors.AuthMFARequired, "MFA code required: Multi-Factor Auth Required (MFA_REQUIRED)"},
-		{"mfa code rejected keeps detail", 403, `{"detail":"Invalid TOTP code"}`, "123456", apperrors.AuthMFAInvalid, "invalid credentials or MFA code: Invalid TOTP code"},
-		{"email verification is not mfa", 403, `{"detail":"Enter the code we sent to your email","error_code":"EMAIL_OTP_REQUIRED"}`, "", apperrors.AuthRequired, "Monarch requires email verification"},
-		{"captcha is not mfa", 403, `{"error_code":"CAPTCHA_REQUIRED"}`, "", apperrors.AuthRequired, "CAPTCHA challenge: CAPTCHA_REQUIRED"},
-		{"unknown rejection surfaces detail", 401, `{"detail":"Account locked"}`, "", apperrors.AuthRequired, "Monarch rejected the login (HTTP 401): Account locked"},
+		{"explicit mfa required", 403, `{"detail":"Multi-Factor Auth Required","error_code":"MFA_REQUIRED"}`, "", "", apperrors.AuthMFARequired, "MFA code required: Multi-Factor Auth Required (MFA_REQUIRED)"},
+		{"mfa code rejected keeps detail", 403, `{"detail":"Invalid TOTP code"}`, "123456", "", apperrors.AuthMFAInvalid, "invalid credentials or MFA code: Invalid TOTP code"},
+		{"email otp required", 403, `{"detail":"Retrieve the code from your email to continue login.","error_code":"EMAIL_OTP_REQUIRED"}`, "", "", apperrors.AuthEmailOTPRequired, "email verification code required"},
+		{"email otp rejected", 403, `{"detail":"Retrieve the code from your email to continue login.","error_code":"EMAIL_OTP_REQUIRED"}`, "", "123456", apperrors.AuthMFAInvalid, "invalid or expired email verification code"},
+		{"password reset", 403, `{"error_code":"PASSWORD_NEEDS_RESET"}`, "", "", apperrors.AuthRequired, "password reset"},
+		{"captcha is not mfa", 403, `{"error_code":"CAPTCHA_REQUIRED"}`, "", "", apperrors.AuthRequired, "CAPTCHA challenge: CAPTCHA_REQUIRED"},
+		{"unknown rejection surfaces detail", 403, `{"detail":"Please update to the latest version of the app to continue login."}`, "", "", apperrors.AuthRequired, "Monarch rejected the login (HTTP 403): Please update"},
 	}
 	for _, tc := range rejectionCases {
 		t.Run(tc.name, func(t *testing.T) {
 			newLoginHTTPClient = rejection(tc.status, tc.body)
-			_, err := Authenticate("a@example.com", "password", tc.mfaCode, "")
+			_, err := Authenticate("a@example.com", "password", tc.mfaCode, "", tc.emailOTP)
 			mustErrContains(t, err, tc.want)
 			var appErr *apperrors.Error
 			if !errors.As(err, &appErr) || appErr.Code != tc.wantCode {
@@ -287,7 +290,7 @@ func testAuthenticateFailureResponses(t *testing.T) {
 				return &http.Response{StatusCode: 500, Body: io.NopCloser(bytes.NewBufferString(""))}, nil
 			})}
 		}
-		_, err := Authenticate("a@example.com", "password", "123456", "")
+		_, err := Authenticate("a@example.com", "password", "123456", "", "")
 		mustErrContains(t, err, "API returned status 500")
 	})
 
@@ -297,7 +300,7 @@ func testAuthenticateFailureResponses(t *testing.T) {
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewBufferString("not-json"))}, nil
 			})}
 		}
-		_, err := Authenticate("a@example.com", "password", "123456", "")
+		_, err := Authenticate("a@example.com", "password", "123456", "", "")
 		mustErrContains(t, err, "failed to parse login response")
 	})
 }
@@ -315,7 +318,7 @@ func testAuthenticateSuccessResponses(t *testing.T) {
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewBufferString(`{"token":"token-123"}`))}, nil
 			})}
 		}
-		sess, err := Authenticate("a@example.com", "password", "123456", "")
+		sess, err := Authenticate("a@example.com", "password", "123456", "", "")
 		if err != nil {
 			t.Fatalf("Authenticate() error = %v", err)
 		}
@@ -343,7 +346,7 @@ func testAuthenticateSuccessResponses(t *testing.T) {
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewBufferString(`{"token":"token-456"}`))}, nil
 			})}
 		}
-		sess, err := Authenticate("a@example.com", "password", "", "JBSWY3DPEHPK3PXP")
+		sess, err := Authenticate("a@example.com", "password", "", "JBSWY3DPEHPK3PXP", "")
 		if err != nil {
 			t.Fatalf("Authenticate() error = %v", err)
 		}
