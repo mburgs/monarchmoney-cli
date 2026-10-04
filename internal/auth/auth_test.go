@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	apperrors "github.com/thedavidweng/monarchmoney-cli/internal/errors"
 	"github.com/thedavidweng/monarchmoney-cli/internal/testutil"
 )
 
@@ -245,6 +246,40 @@ func testAuthenticateFailureResponses(t *testing.T) {
 		_, err := Authenticate("a@example.com", "password", "123456", "")
 		mustErrContains(t, err, "invalid credentials or MFA code")
 	})
+
+	rejection := func(status int, body string) func() *http.Client {
+		return func() *http.Client {
+			return &http.Client{Transport: testutil.RoundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: status, Body: io.NopCloser(bytes.NewBufferString(body))}, nil
+			})}
+		}
+	}
+
+	rejectionCases := []struct {
+		name     string
+		status   int
+		body     string
+		mfaCode  string
+		wantCode apperrors.Code
+		want     string
+	}{
+		{"explicit mfa required", 403, `{"detail":"Multi-Factor Auth Required","error_code":"MFA_REQUIRED"}`, "", apperrors.AuthMFARequired, "MFA code required: Multi-Factor Auth Required (MFA_REQUIRED)"},
+		{"mfa code rejected keeps detail", 403, `{"detail":"Invalid TOTP code"}`, "123456", apperrors.AuthMFAInvalid, "invalid credentials or MFA code: Invalid TOTP code"},
+		{"email verification is not mfa", 403, `{"detail":"Enter the code we sent to your email","error_code":"EMAIL_OTP_REQUIRED"}`, "", apperrors.AuthRequired, "Monarch requires email verification"},
+		{"captcha is not mfa", 403, `{"error_code":"CAPTCHA_REQUIRED"}`, "", apperrors.AuthRequired, "CAPTCHA challenge: CAPTCHA_REQUIRED"},
+		{"unknown rejection surfaces detail", 401, `{"detail":"Account locked"}`, "", apperrors.AuthRequired, "Monarch rejected the login (HTTP 401): Account locked"},
+	}
+	for _, tc := range rejectionCases {
+		t.Run(tc.name, func(t *testing.T) {
+			newLoginHTTPClient = rejection(tc.status, tc.body)
+			_, err := Authenticate("a@example.com", "password", tc.mfaCode, "")
+			mustErrContains(t, err, tc.want)
+			var appErr *apperrors.Error
+			if !errors.As(err, &appErr) || appErr.Code != tc.wantCode {
+				t.Fatalf("error code = %v, want %s", err, tc.wantCode)
+			}
+		})
+	}
 
 	t.Run("api error", func(t *testing.T) {
 		newLoginHTTPClient = func() *http.Client {
